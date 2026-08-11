@@ -3,5 +3,5 @@ from . import views
 
 urlpatterns = [
     path('signup/', views.signup, name="signup"),
-    path('verify-email/<str:token>', views.verify_emial, name="Verify-Email")
+    path('verify-email/<str:token>', views.verify_email, name="Verify-Email")
 ]
