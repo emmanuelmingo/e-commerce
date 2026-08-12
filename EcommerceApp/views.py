@@ -7,8 +7,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 
 from .models import User, EmailVerificationToken
-from .serializers import UserSerializers
-
+from .serializers import SignUpSerializer, LoginDeserializer
 from .services  import _resend_verification, _create_and_send_token
 
 class SignupThrottle(AnonRateThrottle):
@@ -18,24 +17,20 @@ class SignupThrottle(AnonRateThrottle):
 @api_view(['POST'])
 @throttle_classes([SignupThrottle])
 def signup(request):
-    email = request.data.get('email')
-    existing_user = User.objects.filter(email=email).first()
 
     # Same response regardless of outcome  prevents email enumeration.
     generic_response = Response(
-        {"message": "If this email can be used, we've sent instructions to it."},
-        status=200
+        {"message": "User has been created, verify email address"},
+        status=201
     )
 
-    if existing_user:
-        if not existing_user.is_active:
-            _resend_verification(existing_user)
-        return generic_response
+    
 
-    serializer = UserSerializers(data=request.data)
+    serializer = SignUpSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=400)
 
+    # If one fails everything fails
     with transaction.atomic():
         user = serializer.save()
         _create_and_send_token(user)
@@ -65,3 +60,31 @@ def verify_email(request, token):
     record.save()
 
     return HttpResponse("<h2>Your email has been verified. You can now log in.</h2>", status=200)
+
+@api_view(['POST'])
+def login(request):
+    deserializer= LoginDeserializer(data=request.data)
+    if not deserializer.is_valid():
+        return Response(deserializer.errors, status= 400)
+
+    email = deserializer.validated_data["email"]
+    password = deserializer.validated_data["password"]
+    existing_user = User.objects.filter(email=email).first()
+    email_verification = EmailVerificationToken.objects.filter(user_id=existing_user.id).first()
+    if existing_user:
+            if not existing_user.email_verified:
+                if timezone.now() < email_verification.expires_at:
+                    return Response({"message": "Verify your email, a mail was sent to your email"}, status= 200)
+                else:
+                    if email_verification:
+                        email_verification.delete()
+                    _resend_verification(existing_user)
+                    return Response({"message": "Verify your email, a mail has been sent to your email"}, status= 200)
+
+            if not existing_user.check_password(password):
+                return Response({"message": "Invalid Credentials"}, status= 401)
+        
+            return Response({"message": "Login Successful"}, status= 200)
+            
+    else:
+        return Response({"message": "User doesn't exist. SignUp"}, status= 401)
